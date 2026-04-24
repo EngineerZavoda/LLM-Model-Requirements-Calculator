@@ -121,52 +121,37 @@ python client.py "название_модели"
 ### CLI клиент
 
 ```bash
-python client.py <model_name> [--server <server_url>]
+python client.py <model_name> [--server <server_url>] [--mode real|ollama]
 ```
 
 **Примеры**:
 ```bash
-# Локальный сервер
-python client.py "llama-3.3-70b-instruct-Q4_K_M"
+# Реалистичный расчёт (веса + KV cache)
+python client.py "llama-3.3-70b-instruct-Q4_K_M" --mode real
+
+# Как в Ollama (только вес модели)
+python client.py "qwen3.5:9b" --mode ollama
 
 # Удалённый сервер
 python client.py "mixtral-8x7b-instruct-v0.1-GPTQ" --server http://192.168.1.100:8000
 ```
 
-**Вывод клиента** (пример для MacBook Air M3 с 24GB RAM):
-```
-🔍 Сбор характеристик системы...
-   Операционная система: Darwin 23.4.0
-   ОЗУ: 24.0 GB
-   CPU ядер: 10
-   GPU: Apple M3 (доступно VRAM: 24.0 GB)
-📡 Отправка запроса на http://localhost:8000/api/check_model ...
+### Режимы расчёта памяти
 
-============================================================
-РЕЗУЛЬТАТ:
-📊 Модель: llama-3.3-70b-instruct-Q4_K_M
-   Параметров: 70.0B
-   Специализация: instruct
-   Квантование: Q4
+Поддерживаются два режима:
 
-💾 Требования к памяти (контекст 4096 токенов):
-   Веса: 32.6 GB
-   KV cache: 15.0 GB
-   Итого VRAM: 47.6 GB
+- **real** (по умолчанию)  
+  Полный расчёт: веса модели + KV cache.  
+  Используется для точной оценки, влезет ли модель в VRAM.
 
-🖥️ GPU: Apple M3 (VRAM 24.0 GB), ОЗУ 24.0 GB
-❌ Модель не влезает в VRAM.
-🔧 Попробуйте квантование: Q2 (31.3 GB)
-💡 Даже Q2 не влезает. Используйте облачный API или CPU (если ОЗУ ≥ 32 GB).
+- **ollama**  
+  Показывает только вес модели (как в Ollama / LM Studio).  
+  Удобно для быстрого сравнения моделей и UX.
 
-📊 Альтернативные варианты квантования (требуемая VRAM):
-   Q2: 31.3 GB
-   Q3: 39.4 GB
-   Q4: 47.6 GB
-   Q8: 80.2 GB
-   FP16: 145.4 GB
-   BF16: 145.4 GB
-============================================================
+**Пример сравнения:**
+```bash
+python client.py "qwen3.5:9b" --mode real
+python client.py "qwen3.5:9b" --mode ollama
 ```
 
 ### API вручную (через curl или Postman)
@@ -177,6 +162,7 @@ python client.py "mixtral-8x7b-instruct-v0.1-GPTQ" --server http://192.168.1.100
 ```json
 {
   "model_name": "mixtral-8x7b-instruct-v0.1-GPTQ",
+  "mode": "real",
   "system_info": {
     "ram_gb": 32.0,
     "vram_gb": 24.0,
