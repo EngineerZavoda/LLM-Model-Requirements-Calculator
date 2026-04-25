@@ -1,3 +1,4 @@
+# mmcLLM
 # LLM Model Requirements Calculator
 
 Микросервис для оценки, поместится ли LLM на вашей машине.
