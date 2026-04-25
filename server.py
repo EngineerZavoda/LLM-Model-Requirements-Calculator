@@ -2,8 +2,10 @@ from __future__ import annotations
 import re
 import logging
 from dataclasses import dataclass
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 import json
@@ -28,17 +30,13 @@ BYTES_PER_PARAM = {
 
 DEFAULT_QUANT = None  # квантование не задаётся по умолчанию
 MEMORY_MODE = "real"  # "real" или "ollama"
-KV_CACHE_BASE_GB = 1.5   # для 7B, контекст 4096
-BASE_PARAMS = 7e9
-
-BASE_CONTEXT = 4096
 
 # ----------------------------
 # Архитектура моделей (загрузка из JSON + автообновление)
 # ----------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_SPECS_PATH = os.path.join(BASE_DIR, "model_specs.json")
-MODEL_SPECS_URL = "https://raw.githubusercontent.com/huggingface/transformers/main/src/transformers/models/llama/configuration_llama.py"
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 
 def load_local_specs() -> Dict[str, Dict[str, int]]:
@@ -47,9 +45,9 @@ def load_local_specs() -> Dict[str, Dict[str, int]]:
         try:
             with open(MODEL_SPECS_PATH, "w") as f:
                 json.dump({}, f, indent=2)
-            print(f"🆕 Created empty specs file at {MODEL_SPECS_PATH}")
+            logger.info(f"Created empty specs file at {MODEL_SPECS_PATH}")
         except Exception as e:
-            print(f"❌ Failed to create specs file: {e}")
+            logger.error(f"Failed to create specs file: {e}")
             return {}
 
     # читаем файл
@@ -57,7 +55,7 @@ def load_local_specs() -> Dict[str, Dict[str, int]]:
         with open(MODEL_SPECS_PATH, "r") as f:
             return json.load(f)
     except Exception as e:
-        print(f"❌ Failed to load specs: {e}")
+        logger.error(f"Failed to load specs: {e}")
         return {}
 
 
@@ -65,47 +63,11 @@ def save_local_specs(specs: Dict[str, Dict[str, int]]):
     try:
         with open(MODEL_SPECS_PATH, "w") as f:
             json.dump(specs, f, indent=2)
-        print(f"💾 Saved specs to {MODEL_SPECS_PATH}")
+        logger.info(f"Saved specs to {MODEL_SPECS_PATH}")
     except Exception as e:
-        print(f"❌ Failed to save specs: {e}")
+        logger.error(f"Failed to save specs: {e}")
 
 
-def fetch_remote_specs() -> Dict[str, Dict[str, int]]:
-    """
-    Загружает спеки моделей из удалённого JSON (GitHub fallback).
-    Если не удалось — возвращает пустой словарь.
-    """
-    try:
-        url = "https://raw.githubusercontent.com/pvs-dev/llm-model-specs/main/specs.json"
-        resp = requests.get(url, timeout=5)
-
-        if resp.status_code != 200:
-            return {}
-
-        data = resp.json()
-
-        # ожидаемый формат:
-        # {
-        #   "llama-7b": {"hidden_size": 4096, "layers": 32},
-        #   ...
-        # }
-        valid = {}
-
-        for k, v in data.items():
-            if (
-                isinstance(v, dict)
-                and "hidden_size" in v
-                and "layers" in v
-            ):
-                valid[k.lower()] = {
-                    "hidden_size": int(v["hidden_size"]),
-                    "layers": int(v["layers"]),
-                }
-
-        return valid
-
-    except Exception:
-        return {}
 
 @lru_cache(maxsize=128)
 def fetch_from_huggingface_cached(model_name: str) -> Optional[Dict[str, int]]:
@@ -116,23 +78,23 @@ def fetch_from_huggingface_cached(model_name: str) -> Optional[Dict[str, int]]:
     try:
         parsed = parse_model_name(model_name)
         if not parsed:
-            print("❌ HF: parse failed")
+            logger.warning("HF parse failed")
             return None
 
         normalized = normalize_model_key(parsed)
-        print(f"🔍 HF search for: {normalized}")
+        logger.info(f"HF search for: {normalized}")
 
         # --- 1. поиск моделей через HF API ---
         search_url = f"https://huggingface.co/api/models?search={normalized}&limit=5"
         resp = requests.get(search_url, timeout=5)
 
         if resp.status_code != 200:
-            print("❌ HF search failed")
+            logger.warning("HF search failed")
             return None
 
         models = resp.json()
         if not models:
-            print("❌ HF: no models found")
+            logger.warning("HF no models found")
             return None
 
         # --- 2. перебираем кандидатов ---
@@ -155,7 +117,7 @@ def fetch_from_huggingface_cached(model_name: str) -> Optional[Dict[str, int]]:
                 layers = data.get("num_hidden_layers") or data.get("n_layer")
 
                 if hidden and layers:
-                    print(f"✅ HF match: {repo_id}")
+                    logger.info(f"HF match: {repo_id}")
                     return {
                         "hidden_size": int(hidden),
                         "layers": int(layers),
@@ -164,26 +126,20 @@ def fetch_from_huggingface_cached(model_name: str) -> Optional[Dict[str, int]]:
             except Exception:
                 continue
 
-        print("⚠️ HF: no valid config found")
+        logger.warning("HF no valid config found")
         return None
 
     except Exception as e:
-        print(f"❌ HF resolver error: {e}")
+        logger.error(f"HF resolver error: {e}")
         return None
 
 def init_model_specs() -> Dict[str, Dict[str, int]]:
     local_specs = load_local_specs()
-    remote_specs = fetch_remote_specs()
 
-    merged = local_specs.copy()
+    # гарантированно сохраняем файл (создаётся если не было)
+    save_local_specs(local_specs)
 
-    if remote_specs:
-        merged.update(remote_specs)
-
-    # гарантированно сохраняем файл
-    save_local_specs(merged)
-
-    return merged
+    return local_specs
 
 
 MODEL_SPECS = init_model_specs()
@@ -237,7 +193,7 @@ def get_arch_params(model: "ParsedModel") -> Tuple[int, int]:
         normalized_key = normalize_model_key(model)
         MODEL_SPECS[normalized_key] = hf_spec
         save_local_specs(MODEL_SPECS)
-        print(f"🧠 Auto-added spec for {normalized_key} from HuggingFace")
+        logger.info(f"Auto-added spec for {normalized_key} from HuggingFace")
         return hf_spec["hidden_size"], hf_spec["layers"]
 
     # --- fallback (эвристика + автосохранение) ---
@@ -253,7 +209,7 @@ def get_arch_params(model: "ParsedModel") -> Tuple[int, int]:
         "layers": num_layers
     }
     save_local_specs(MODEL_SPECS)
-    print(f"⚠️ Auto-added heuristic spec for {normalized_key}")
+    logger.warning(f"Auto-added heuristic spec for {normalized_key}")
 
     return hidden_size, num_layers
 
@@ -405,7 +361,6 @@ def estimate_memory(model: ParsedModel, context_len: int = 4096, mode: str = MEM
     # --- 3. архитектура модели ---
     hidden_size, num_layers = get_arch_params(model)
 
-    # --- 4. KV cache (точная формула) ---
     bytes_per_element = 2  # обычно FP16
 
     kv_cache_bytes = (
@@ -414,11 +369,7 @@ def estimate_memory(model: ParsedModel, context_len: int = 4096, mode: str = MEM
 
     kv_cache_gb = kv_cache_bytes / (1024**3)
 
-    # более реалистичная модель (как в Ollama / llama.cpp)
-    # KV cache обычно значительно меньше из-за оптимизаций
     kv_cache_gb *= 0.25  # эмпирический коэффициент
-
-    # ограничение (реалистичное)
     kv_cache_gb = min(kv_cache_gb, model.param_count_b * 0.8)
 
     # режим Ollama: считаем только веса
@@ -432,7 +383,6 @@ def get_possible_quantizations(model: ParsedModel) -> Dict[str, float]:
     result = {}
     for quant, bytes_per in BYTES_PER_PARAM.items():
         weights_gb = (model.param_count_b * 1e9 * bytes_per) / (1024**3)
-        # используем уже более реалистичный cache (не зависит от квантования)
         _, cache_gb = estimate_memory(model, mode="real")
         result[quant] = weights_gb + cache_gb
     return result
@@ -458,12 +408,14 @@ def generate_recommendation(
     lines.append(f"\n💾 Требования к памяти (контекст 4096 токенов):")
     lines.append(f"   Веса: {weights_gb:.1f} GB")
     if mode == "ollama":
-        lines.append("   KV cache: (скрыт в режиме Ollama)")
-        lines.append(f"   Итого VRAM: {weights_gb:.1f} GB")
+        lines.append("   KV cache: (hidden in Ollama mode)")
+        total_display = weights_gb
     else:
         lines.append(f"   KV cache: {cache_gb:.1f} GB")
-        lines.append(f"   Итого VRAM: {total_needed:.1f} GB")
-        lines.append("   ℹ️ Ollama обычно показывает только вес модели (без KV cache)")
+        total_display = total_needed
+        lines.append("   ℹ️ Ollama shows mostly weights only")
+
+    lines.append(f"   Итого VRAM: {total_display:.1f} GB")
 
     if not has_gpu:
         lines.append(f"\n🖥️ Система: нет дискретного GPU, ОЗУ {ram_gb:.0f} GB")
@@ -493,6 +445,12 @@ def generate_recommendation(
 # FastAPI приложение
 # ----------------------------
 app = FastAPI(title="LLM Model Checker")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/")
+async def index():
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 @app.post("/api/check_model", response_model=ModelCheckResponse)
 async def check_model(req: ModelCheckRequest):

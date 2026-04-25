@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LLM Model Requirements Calculator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="bg-shape bg-shape-1"></div>
+  <div class="bg-shape bg-shape-2"></div>
+
+  <main class="layout">
+    <section class="panel hero">
+      <p class="eyebrow">LLM TOOLKIT</p>
+      <h1>Проверка совместимости модели с вашим железом</h1>
+      <p class="subtitle">
+        Введите название модели, выберите режим расчета и сравните требуемую память с вашей системой.
+      </p>
+    </section>
+
+    <section class="panel form-panel">
+      <form id="check-form" novalidate>
+        <div class="field full">
+          <label for="model_name">Название модели</label>
+          <input id="model_name" name="model_name" type="text" placeholder="llama-3.3-70b-instruct-Q4_K_M" required />
+        </div>
+
+        <div class="field">
+          <label for="platform">Платформа</label>
+          <select id="platform" name="platform">
+            <option value="pc">PC (Windows/Linux)</option>
+            <option value="mac">Mac (Apple Silicon/Intel)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="mode">Режим</label>
+          <select id="mode" name="mode">
+            <option value="real">real (веса + KV cache)</option>
+            <option value="ollama">ollama (только веса)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label id="ram_label" for="ram_gb">RAM, GB</label>
+          <input id="ram_gb" name="ram_gb" type="number" min="1" step="0.1" value="32" required />
+        </div>
+
+        <div class="field">
+          <label id="vram_label" for="vram_gb">VRAM, GB</label>
+          <input id="vram_gb" name="vram_gb" type="number" min="0" step="0.1" value="12" required />
+        </div>
+
+        <div class="field">
+          <label id="gpu_label" for="gpu_name">GPU</label>
+          <input id="gpu_name" name="gpu_name" type="text" value="NVIDIA RTX 3060" required />
+        </div>
+
+        <div id="has_gpu_field" class="field checkbox-row">
+          <label class="check-label" for="has_gpu">
+            <input id="has_gpu" name="has_gpu" type="checkbox" checked />
+            Есть GPU
+          </label>
+        </div>
+
+        <div class="field">
+          <label for="os">ОС</label>
+          <input id="os" name="os" type="text" value="Linux" />
+        </div>
+
+        <div class="field">
+          <label for="cpu_cores">CPU ядер</label>
+          <input id="cpu_cores" name="cpu_cores" type="number" min="1" step="1" value="8" />
+        </div>
+
+        <p id="platform_hint" class="muted full"></p>
+
+        <div class="actions full">
+          <button id="submit-btn" type="submit">Проверить модель</button>
+        </div>
+      </form>
+      <p id="error" class="error" role="alert" aria-live="polite"></p>
+    </section>
+
+    <section class="panel result-panel hidden" id="result-panel">
+      <div class="result-head">
+        <h2>Результат</h2>
+        <span id="status-chip" class="status-chip">Готово</span>
+      </div>
+
+      <pre id="recommendation" class="recommendation"></pre>
+
+      <div class="grid metrics">
+        <article class="metric-card">
+          <p>Веса</p>
+          <strong id="weights">-</strong>
+        </article>
+        <article class="metric-card">
+          <p>KV cache</p>
+          <strong id="kv_cache">-</strong>
+        </article>
+        <article class="metric-card">
+          <p>Итого VRAM</p>
+          <strong id="total">-</strong>
+        </article>
+      </div>
+
+      <h3>Варианты квантования</h3>
+      <div id="quantizations" class="quant-list"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
